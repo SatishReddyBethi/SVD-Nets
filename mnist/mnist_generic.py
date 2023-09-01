@@ -11,10 +11,9 @@ from torch.optim.lr_scheduler import StepLR
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(784, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, 128)
-        self.fc4 = nn.Linear(128, 10)
+        self.fc1 = nn.Linear(784, 512)
+        self.fc2 = nn.Linear(512, 128)
+        self.fc3 = nn.Linear(128, 10)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -22,8 +21,6 @@ class Net(nn.Module):
         x = self.fc2(x)
         x = F.sigmoid(x)
         x = self.fc3(x)
-        x = F.sigmoid(x)
-        x = self.fc4(x)
         x = F.sigmoid(x)
         output = F.log_softmax(x, dim=1)
         return output
