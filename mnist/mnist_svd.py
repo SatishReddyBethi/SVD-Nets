@@ -19,6 +19,7 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
         A_out = F.one_hot(y, num_classes=num_classes)
         y_value = y.item()
         Z[y_value] = {}
+        priority_list = torch.tensor([y])
         # TODO: Vectorize this for loop. Calculate Z for multiple y values at once.
         for j in reversed(range(len(weights))):
             # Iterates from last layer to first layer
@@ -26,17 +27,28 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
             # Save Z to a serperate list
             Z[y_value][j] = Z_out
             #print(f"Layer {j} => Z.shape: {Z_out.shape}")
+            Z_size = Z_out.shape[0]
             A = torch.zeros(weights[j].shape[0])
-            for k in range(Z_out.shape[0]):
+            next_priority_list = torch.zeros(0)
+            #print(f"layer[{j}] ---> {priority_list}")
+            for k in range(Z_size):
                 # Iterates through each node of a layer
                 if Z_out[k] > 0:
                     # Maximize Z
-                    A = A + (weights[j][:,k] > 0)
+                    # Assign higher weight to priority Z values
+                    A_k_approx = weights[j][:,k] > 0
                 else:
                     # Minimize Z
-                    A = A + (weights[j][:,k] < 0)
+                    A_k_approx = weights[j][:,k] < 0
+                if k in priority_list:
+                    w = 1
+                    next_priority_list = torch.cat((next_priority_list, torch.where(A_k_approx)[0]))
+                else:
+                    w = 0.1
+                A = A + (w * A_k_approx)
             # Save A as it's average from all the layers
-            A_out = A/Z_out.shape[0]
+            A_out = A/Z_size
+            priority_list = torch.unique(next_priority_list)
         inputs_approx.append(A_out)
     # Clear all previous plots
     plt.close('all')
