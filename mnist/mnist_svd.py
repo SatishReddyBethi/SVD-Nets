@@ -1,18 +1,20 @@
 from __future__ import print_function
 import argparse
 import torch
-import torch.nn as nn
+#import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
+#import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
+#from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
-import time
+#import time
+import matplotlib.pyplot as plt
 
-def estimate_activations(weights, ground_truth_list, num_classes):
+def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
     unique_grouth_truths = torch.unique(ground_truth_list)
     #print(f"unique_grouth_truths: {unique_grouth_truths}")
     Z = {}
+    inputs_approx = []
     for y in unique_grouth_truths:
         A_out = F.one_hot(y, num_classes=num_classes)
         y_value = y.item()
@@ -35,6 +37,15 @@ def estimate_activations(weights, ground_truth_list, num_classes):
                     A = A + (weights[j][:,k] < 0)
             # Save A as it's average from all the layers
             A_out = A/Z_out.shape[0]
+        inputs_approx.append(A_out)
+    # Clear all previous plots
+    plt.close('all')
+    fig = plt.figure(figsize=(8, 8))
+    for i in range(len(unique_grouth_truths)):
+        ax = fig.add_subplot(3, 4, i+1)
+        ax.imshow(inputs_approx[i].view(28,28))
+        ax.set_title(unique_grouth_truths[i])
+    plt.savefig(f"approx_predictions/{batch_idx}.png")
     #print(Z.keys())
     #print(Z[unique_grouth_truths[1].item()].keys())
     return Z
@@ -80,8 +91,8 @@ def calculate_weights(input, target, Z_est, principal_vecs, principal_vals, weig
         Z_new = A@weights[layer]
         A = torch.sigmoid(Z_new)
     
-    print(f"Final Output: {torch.argmax(A, dim=1)}")
-    print(f"Ground Truth: {target}")
+    #print(f"Final Output: {torch.argmax(A, dim=1)}")
+    #print(f"Ground Truth: {target}")
     return weights,principal_vecs,principal_vals
 
 
@@ -105,6 +116,10 @@ def train(args, train_loader, epoch, test_loader):
     # Remember that shape of z is always (batch_size,w.shape[0],1)
     principal_vecs = []
     principal_vals = []
+    train_acc_list = []
+    imm_train_acc_list = []
+    test_acc_list = []
+    num_images_trained = []
     for i in range(len(weights)):
         principal_vecs.append(torch.zeros(weights[i].shape[1],weights[i].shape[0],weights[i].shape[0]))
         principal_vals.append(torch.zeros(weights[i].shape[1],weights[i].shape[0]))
@@ -113,13 +128,27 @@ def train(args, train_loader, epoch, test_loader):
     old_target = torch.zeros(0)
     for batch_idx, (data, target) in enumerate(train_loader):
         data = torch.flatten(data, start_dim=1)
-        Z_est = estimate_activations(weights, target, num_classes=num_classes)
+        Z_est = estimate_activations(weights, target, num_classes, batch_idx)
         weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
         if (old_data.shape[0] > 0) and (old_target.shape[0] > 0):
             pred = torch.argmax(forward_pass(old_data, weights), dim=1)
-            acc = torch.sum(pred == old_target)/old_data.shape[0]
-            print(f"Old Data Accuracy: {acc*100}% | No. of examples: {old_data.shape[0]}")
-            test(test_loader,weights)
+            imm_pred = torch.argmax(forward_pass(data, weights), dim=1)
+            acc = 100 * torch.sum(pred == old_target)/old_data.shape[0]
+            imm_acc = 100 * torch.sum(imm_pred == target)/data.shape[0]
+            print(f"Old Data Accuracy: {acc}% | No. of examples: {old_data.shape[0]}/{len(train_loader)*data.shape[0]}")
+            test_acc = test(test_loader,weights)
+            # Save accuracies to a list
+            train_acc_list.append(acc)
+            imm_train_acc_list.append(imm_acc)
+            test_acc_list.append(test_acc)
+            num_images_trained.append(old_data.shape[0])
+            # Clear all previous plots
+            plt.close('all')
+            plt.plot(num_images_trained, train_acc_list, marker='o', label='Old Train Acc')
+            plt.plot(num_images_trained, imm_train_acc_list, marker='o', label='Immediate Train Acc')
+            plt.plot(num_images_trained, test_acc_list, marker='o', label='Test Acc')
+            plt.legend()
+            plt.savefig(f"acc.png")
 
         old_data = torch.cat([old_data, data],dim=0)
         print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
@@ -144,9 +173,11 @@ def test(test_loader,weights):
             pred = forward_pass(data,weights).argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
+    test_acc = 100. * correct / len(test_loader.dataset)
     print('\nTest Set Accuracy: {}/{} ({:.0f}%)\n'.format(
-        correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+        correct, len(test_loader.dataset), test_acc))
+    
+    return test_acc
 
 def main():
     # Training settings
@@ -178,6 +209,7 @@ def main():
     use_mps = not args.no_mps and torch.backends.mps.is_available()
 
     torch.manual_seed(args.seed)
+    plt.set_cmap('gray')
 
     if use_cuda:
         device = torch.device("cuda")
