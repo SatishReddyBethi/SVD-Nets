@@ -19,7 +19,7 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
         A_out = F.one_hot(y, num_classes=num_classes)
         y_value = y.item()
         Z[y_value] = {}
-        priority_list = torch.tensor([y])
+        priority_list = torch.where(A_out)[0]
         # TODO: Vectorize this for loop. Calculate Z for multiple y values at once.
         for j in reversed(range(len(weights))):
             # Iterates from last layer to first layer
@@ -50,6 +50,9 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
             A_out = A/Z_size
             priority_list = torch.unique(next_priority_list)
         inputs_approx.append(A_out)
+    # Test approximated images for output
+    for i in range(len(unique_grouth_truths)):
+        print(f"Prediction of [{unique_grouth_truths[i]}] --> [{torch.round(forward_pass(inputs_approx[i], weights)*100)/100}]")
     # Clear all previous plots
     plt.close('all')
     fig = plt.figure(figsize=(8, 8))
@@ -112,7 +115,7 @@ def sigmoid_inverse(a:torch.Tensor):
     # Clamp the a values between 1*10^-6 and 1-1*10^-6
     return torch.special.logit(a, eps=1e-6) 
 
-def train(args, train_loader, epoch, test_loader):
+def train(args, train_loader, test_loader):
     # Do not use gradient calculation
     torch.set_grad_enabled(False)
     # Set initial weights between -1 and 1
@@ -138,35 +141,41 @@ def train(args, train_loader, epoch, test_loader):
     
     old_data = torch.zeros(0,weights[0].shape[0])
     old_target = torch.zeros(0)
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data = torch.flatten(data, start_dim=1)
-        Z_est = estimate_activations(weights, target, num_classes, batch_idx)
-        weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
-        if (old_data.shape[0] > 0) and (old_target.shape[0] > 0):
-            pred = torch.argmax(forward_pass(old_data, weights), dim=1)
-            imm_pred = torch.argmax(forward_pass(data, weights), dim=1)
-            acc = 100 * torch.sum(pred == old_target)/old_data.shape[0]
-            imm_acc = 100 * torch.sum(imm_pred == target)/data.shape[0]
-            print(f"Old Data Accuracy: {acc}% | No. of examples: {old_data.shape[0]}/{len(train_loader)*data.shape[0]}")
-            test_acc = test(test_loader,weights)
-            # Save accuracies to a list
-            train_acc_list.append(acc)
-            imm_train_acc_list.append(imm_acc)
-            test_acc_list.append(test_acc)
-            num_images_trained.append(old_data.shape[0])
-            # Clear all previous plots
-            plt.close('all')
-            plt.plot(num_images_trained, train_acc_list, marker='o', label='Old Train Acc')
-            plt.plot(num_images_trained, imm_train_acc_list, marker='o', label='Immediate Train Acc')
-            plt.plot(num_images_trained, test_acc_list, marker='o', label='Test Acc')
-            plt.legend()
-            plt.savefig(f"acc.png")
+    
+    for epoch in range(1, args.epochs + 1):
+        for batch_idx, (data, target) in enumerate(train_loader):
+            data = torch.flatten(data, start_dim=1)
+            Z_est = estimate_activations(weights, target, num_classes, batch_idx)
+            weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
+            if (old_data.shape[0] > 0) and (old_target.shape[0] > 0):
+                pred = torch.argmax(forward_pass(old_data, weights), dim=1)
+                imm_pred = torch.argmax(forward_pass(data, weights), dim=1)
+                acc = 100 * torch.sum(pred == old_target)/old_data.shape[0]
+                imm_acc = 100 * torch.sum(imm_pred == target)/data.shape[0]
+                print(f"Old Data Accuracy: {acc}% | No. of examples: {old_data.shape[0]}/{len(train_loader)*data.shape[0]}")
+                test_acc = test(test_loader,weights)
+                # Save accuracies to a list
+                train_acc_list.append(acc)
+                imm_train_acc_list.append(imm_acc)
+                test_acc_list.append(test_acc)
+                num_images_trained.append(((epoch-1)*len(train_loader))+batch_idx)
+                # Clear all previous plots
+                plt.close('all')
+                plt.plot(num_images_trained, train_acc_list, marker='o', label='Old Train Acc')
+                plt.plot(num_images_trained, imm_train_acc_list, marker='o', label='Immediate Train Acc')
+                plt.plot(num_images_trained, test_acc_list, marker='o', label='Test Acc')
+                plt.legend()
+                plt.savefig(f"acc.png")
 
-        old_data = torch.cat([old_data, data],dim=0)
-        print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
-        old_target = torch.cat([old_target, target],dim=0)
+            old_data = torch.cat([old_data, data],dim=0)
+            #print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
+            old_target = torch.cat([old_target, target],dim=0)
+            if args.dry_run:
+                break
+        
         if args.dry_run:
             break
+    
     return weights,principal_vecs,principal_vals
 
 def forward_pass(input, weights):
@@ -250,11 +259,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    for epoch in range(1, args.epochs + 1):
-        weights,principal_vecs,principal_vals = train(args, train_loader, epoch, test_loader)
-        test(test_loader,weights)
-        if args.dry_run:
-            break
+    weights,principal_vecs,principal_vals = train(args, train_loader, test_loader)
 
 if __name__ == '__main__':
     main()
