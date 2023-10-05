@@ -162,3 +162,7 @@ cython_debug/
 # PyTorch Datasets
 .gz
 data/**
+
+# Test data
+**/approx_predictions/*
+**/acc.png
