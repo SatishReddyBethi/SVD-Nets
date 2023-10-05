@@ -10,49 +10,69 @@ from tqdm import tqdm
 #import time
 import matplotlib.pyplot as plt
 
+def sigmoid(z):
+    return 1/(1 + torch.exp(-z))
+
+def der_sigmoid(z):
+    num = torch.exp(-z)
+    den = (1 + num)**2
+    return num/den
+
 def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
     unique_grouth_truths = torch.unique(ground_truth_list)
     #print(f"unique_grouth_truths: {unique_grouth_truths}")
+    sample_input = torch.rand(1,weights[0].shape[0])
+    A_sample = forward_pass(sample_input, weights, return_all = True)
+    num_layers = len(weights)
     Z = {}
     inputs_approx = []
     for y in unique_grouth_truths:
-        A_out = F.one_hot(y, num_classes=num_classes)
+        # Get one hot vector of the ground truth
+        Y = F.one_hot(y, num_classes=num_classes).reshape(1,-1)
         y_value = y.item()
+        #print(f"Calculating for y = [{y_value}] =====>")
         Z[y_value] = {}
-        priority_list = torch.where(A_out)[0]
-        # TODO: Vectorize this for loop. Calculate Z for multiple y values at once.
-        for j in reversed(range(len(weights))):
+        error = A_sample[-1].reshape(1,-1) - Y # 1x10
+        A_out = Y # 1x10
+        old_delta = error
+        #new_weights = [0]*num_layers
+        for layer in reversed(range(num_layers)):
             # Iterates from last layer to first layer
-            Z_out = sigmoid_inverse(A_out)
-            # Save Z to a serperate list
-            Z[y_value][j] = Z_out
-            #print(f"Layer {j} => Z.shape: {Z_out.shape}")
-            Z_size = Z_out.shape[0]
-            A = torch.zeros(weights[j].shape[0])
-            next_priority_list = torch.zeros(0)
-            #print(f"layer[{j}] ---> {priority_list}")
-            for k in range(Z_size):
-                # Iterates through each node of a layer
-                if Z_out[k] > 0:
-                    # Maximize Z
-                    # Assign higher weight to priority Z values
-                    A_k_approx = weights[j][:,k] > 0
-                else:
-                    # Minimize Z
-                    A_k_approx = weights[j][:,k] < 0
-                if k in priority_list:
-                    w = 1
-                    next_priority_list = torch.cat((next_priority_list, torch.where(A_k_approx)[0]))
-                else:
-                    w = 0.1
-                A = A + (w * A_k_approx)
-            # Save A as it's average from all the layers
-            A_out = A/Z_size
-            priority_list = torch.unique(next_priority_list)
+            Z[y_value][layer] = sigmoid_inverse(A_out).T # 10x1
+            # Calculate delta
+            new_delta = old_delta * der_sigmoid(A_sample[layer+1]) # 1x10
+            # ===
+            #new_w_delta = new_delta.T @ A_sample[layer] # 10x1|1x128: 10x128
+            #new_weights[layer] = weights[layer] - new_w_delta.T # 128x10
+            # ===
+            new_delta = weights[layer] @ new_delta.T # 128x10|10x1: 128x1
+            old_delta = new_delta.T # 1x128
+            A_out = A_sample[layer] - old_delta # 1x128
+            
+            # if layer == 0:
+            #     Z_1 = Z[y_value][0].T
+            #     A_1 = torch.sigmoid(Z_1)
+            #     Z_2 = A_1@weights[1]
+            #     A_2 = torch.sigmoid(Z_2)
+            #     Z_3 = A_2@weights[2]
+            #     A_3 = torch.sigmoid(Z_3)
+            #     print(f"Prediction of weights [{y_value}] --> [{torch.round(A_3*100)/100}]")
+            #     Z_2 = Z[y_value][1].T
+            #     A_2 = torch.sigmoid(Z_2)
+            #     Z_3 = A_2@weights[2]
+            #     A_3 = torch.sigmoid(Z_3)
+            #     print(f"Prediction of weights [{y_value}] --> [{torch.round(A_3*100)/100}]")
+            #     print(Z[y_value].keys())
+            #     Z_3 = Z[y_value][2].T
+            #     A_3 = torch.sigmoid(Z_3)
+            #     print(f"Prediction of weights [{y_value}] --> [{torch.round(A_3*100)/100}]")
+
         inputs_approx.append(A_out)
-    # Test approximated images for output
+    
     for i in range(len(unique_grouth_truths)):
         print(f"Prediction of [{unique_grouth_truths[i]}] --> [{torch.round(forward_pass(inputs_approx[i], weights)*100)/100}]")
+    
+    
     # Clear all previous plots
     plt.close('all')
     fig = plt.figure(figsize=(8, 8))
@@ -61,9 +81,52 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx):
         ax.imshow(inputs_approx[i].view(28,28))
         ax.set_title(unique_grouth_truths[i])
     plt.savefig(f"approx_predictions/{batch_idx}.png")
-    #print(Z.keys())
-    #print(Z[unique_grouth_truths[1].item()].keys())
     return Z
+    
+    # Z = {}
+    # inputs_approx = []
+    # w_A = [0.1, 0.1]
+    # for y in unique_grouth_truths:
+    #     A_out = F.one_hot(y, num_classes=num_classes)
+    #     y_value = y.item()
+    #     Z[y_value] = {}
+    #     # TODO: Vectorize this for loop. Calculate Z for multiple y values at once.
+    #     for j in reversed(range(len(weights))):
+    #         # Iterates from last layer to first layer
+    #         Z_out = sigmoid_inverse(A_out)
+    #         # Save Z to a serperate list
+    #         Z[y_value][j] = Z_out
+    #         #print(f"Layer {j} => Z.shape: {Z_out.shape}")
+    #         Z_size = Z_out.shape[0]
+    #         A = torch.zeros(weights[j].shape[0])
+    #         #print(f"layer[{j}] ---> {priority_list}")
+    #         for k in range(Z_size):
+    #             # Iterates through each node of a layer
+    #             if Z_out[k] > 0:
+    #                 # Maximize Z
+    #                 # Assign higher weight to priority Z values
+    #                 A_k_approx = weights[j][:,k] > 0
+    #             else:
+    #                 # Minimize Z
+    #                 A_k_approx = weights[j][:,k] < 0
+    #             A = A + A_k_approx
+    #         # Save A as it's average from all the layers
+    #         A_out = A/Z_size
+    #     inputs_approx.append(A_out)
+    # # Test approximated images for output
+    # for i in range(len(unique_grouth_truths)):
+    #     print(f"Prediction of [{unique_grouth_truths[i]}] --> [{torch.round(forward_pass(inputs_approx[i], weights)*100)/100}]")
+    # # Clear all previous plots
+    # plt.close('all')
+    # fig = plt.figure(figsize=(8, 8))
+    # for i in range(len(unique_grouth_truths)):
+    #     ax = fig.add_subplot(3, 4, i+1)
+    #     ax.imshow(inputs_approx[i].view(28,28))
+    #     ax.set_title(unique_grouth_truths[i])
+    # plt.savefig(f"approx_predictions/{batch_idx}.png")
+    # #print(Z.keys())
+    # #print(Z[unique_grouth_truths[1].item()].keys())
+    # return Z
 
 def calculate_weights(input, target, Z_est, principal_vecs, principal_vals, weights):
     # Calculate weights using SVD
@@ -76,7 +139,7 @@ def calculate_weights(input, target, Z_est, principal_vecs, principal_vals, weig
         for i in range(batch_size):
             # Calculate weights for each example
             # TODO: Vectorize this for loop. Try to calculate weights for multiple targets at once.
-            Z[layer][:,i] = Z_est[target[i].item()][layer]
+            Z[layer][:,i] = Z_est[target[i].item()][layer][:,0]
 
     A = input
     for layer in range(num_layers):
@@ -147,6 +210,9 @@ def train(args, train_loader, test_loader):
             data = torch.flatten(data, start_dim=1)
             Z_est = estimate_activations(weights, target, num_classes, batch_idx)
             weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
+            old_data = torch.cat([old_data, data],dim=0)
+            #print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
+            old_target = torch.cat([old_target, target],dim=0)
             if (old_data.shape[0] > 0) and (old_target.shape[0] > 0):
                 pred = torch.argmax(forward_pass(old_data, weights), dim=1)
                 imm_pred = torch.argmax(forward_pass(data, weights), dim=1)
@@ -167,9 +233,6 @@ def train(args, train_loader, test_loader):
                 plt.legend()
                 plt.savefig(f"acc.png")
 
-            old_data = torch.cat([old_data, data],dim=0)
-            #print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
-            old_target = torch.cat([old_target, target],dim=0)
             if args.dry_run:
                 break
         
@@ -178,12 +241,15 @@ def train(args, train_loader, test_loader):
     
     return weights,principal_vecs,principal_vals
 
-def forward_pass(input, weights):
-    A = input
+def forward_pass(input, weights, return_all = False):
+    A = [input]
     for layer in range(len(weights)):
-        Z = A@weights[layer]
-        A = torch.sigmoid(Z)
-    return A
+        Z = A[layer]@weights[layer]
+        A.append(torch.sigmoid(Z))
+    
+    if return_all:
+        return A
+    return A[-1]
 
 def test(test_loader,weights):
     correct = 0
@@ -197,7 +263,6 @@ def test(test_loader,weights):
     test_acc = 100. * correct / len(test_loader.dataset)
     print('\nTest Set Accuracy: {}/{} ({:.0f}%)\n'.format(
         correct, len(test_loader.dataset), test_acc))
-    
     return test_acc
 
 def main():
