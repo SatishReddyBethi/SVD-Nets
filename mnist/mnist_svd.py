@@ -164,7 +164,10 @@ def calculate_weights(args, input, target, Z_est, principal_vecs, principal_vals
             vals = all_vals[i,:]
             U, S, Vh = torch.linalg.svd(vecs, full_matrices=False)
             sigma_rec = 1/S
-            weights[layer][:,i] = (Vh.T*sigma_rec)@U.T@vals
+            new_weights = (Vh.T*sigma_rec)@U.T@vals
+            # w = w - lr * (w - w_new)
+            # w = (1 -lr)*w + lr*w_new
+            weights[layer][:,i] = ((1-args.lr)*weights[layer][:,i]) - (args.lr*new_weights)
             # Calculate prinicipal vecs and values
             if add_bias:
                 principal_vecs[layer][i,:,:] = (S.reshape(S.shape[0],1)*Vh)[:-1,:-1]
