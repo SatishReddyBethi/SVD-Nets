@@ -249,9 +249,9 @@ def train(args, train_loader, test_loader, add_bias = True):
                 num_images_trained.append(((epoch-1)*len(train_loader))+batch_idx)
                 # Clear all previous plots
                 plt.close('all')
-                plt.plot(num_images_trained, train_acc_list, marker='o', label='Old Train Acc')
-                plt.plot(num_images_trained, imm_train_acc_list, marker='o', label='Immediate Train Acc')
-                plt.plot(num_images_trained, test_acc_list, marker='o', label='Test Acc')
+                plt.plot(num_images_trained, train_acc_list, label='Old Train Acc')
+                plt.plot(num_images_trained, imm_train_acc_list, label='Immediate Train Acc')
+                plt.plot(num_images_trained, test_acc_list, label='Test Acc')
                 plt.legend()
                 plt.savefig(f"acc{args.suffix}.png")
 
