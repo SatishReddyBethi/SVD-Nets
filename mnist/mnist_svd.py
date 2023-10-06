@@ -28,7 +28,7 @@ def estimate_activations(args, weights, ground_truth_list, num_classes, batch_id
             input_dim -= 1
         sample_input = torch.ones(1,input_dim)
         #sample_input = torch.rand(1,weights[0].shape[0])
-        A_sample = forward_pass(sample_input, weights, return_all = True)
+        A_sample = forward_pass(sample_input, weights, return_all = True, add_bias=add_bias)
         num_layers = len(weights)
         for y in unique_grouth_truths:
             # Get one hot vector of the ground truth
@@ -49,7 +49,10 @@ def estimate_activations(args, weights, ground_truth_list, num_classes, batch_id
                 #new_w_delta = new_delta.T @ A_sample[layer] # 10x1|1x128: 10x128
                 #new_weights[layer] = weights[layer] - new_w_delta.T # 128x10
                 # ===
-                new_delta = weights[layer][:-1,:] @ new_delta.T # 128x10|10x1: 128x1
+                if add_bias:
+                    new_delta = weights[layer][:-1,:] @ new_delta.T # 128x10|10x1: 128x1
+                else:
+                    new_delta = weights[layer] @ new_delta.T # 128x10|10x1: 128x1
                 old_delta = new_delta.T # 1x128
                 A_out = A_sample[layer] - old_delta # 1x128
                 
@@ -105,7 +108,7 @@ def estimate_activations(args, weights, ground_truth_list, num_classes, batch_id
         
     # Test approximated images for output
     for i in range(len(unique_grouth_truths)):
-        print(f"Prediction of [{unique_grouth_truths[i]}] --> [{torch.round(forward_pass(inputs_approx[i], weights)*100)/100}]")
+        print(f"Prediction of [{unique_grouth_truths[i]}] --> [{torch.round(forward_pass(inputs_approx[i], weights, add_bias=add_bias)*100)/100}]")
     # Clear all previous plots
     plt.close('all')
     fig = plt.figure(figsize=(8, 8))
@@ -118,7 +121,7 @@ def estimate_activations(args, weights, ground_truth_list, num_classes, batch_id
     #print(Z[unique_grouth_truths[1].item()].keys())
     return Z
 
-def calculate_weights(input, target, Z_est, principal_vecs, principal_vals, weights, add_bias = True):
+def calculate_weights(args, input, target, Z_est, principal_vecs, principal_vals, weights, add_bias = True):
     # Calculate weights using SVD
     num_layers = len(weights)
     batch_size = input.shape[0]
@@ -140,7 +143,10 @@ def calculate_weights(input, target, Z_est, principal_vecs, principal_vals, weig
         if add_bias:
             in_dim -= 1
         #print(f"A.shape: {A.shape}")
-        batch_vecs = A.view(1,batch_size,in_dim+1).repeat(out_dim,1,1)
+        if add_bias:
+            batch_vecs = A.view(1,batch_size,in_dim+1).repeat(out_dim,1,1)
+        else:
+            batch_vecs = A.view(1,batch_size,in_dim).repeat(out_dim,1,1)
         batch_vals = Z[layer]
         #print(f"principal_vecs[{layer}]: {principal_vecs[layer].shape}")
         #print(f"principal_vals[{layer}]: {principal_vals[layer].shape}")
@@ -186,10 +192,13 @@ def train(args, train_loader, test_loader, add_bias = True):
     torch.set_grad_enabled(False)
     # Set initial weights between -1 and 1
     # We have to transpose the weight matrix to be able to multiply matries with batches
+    bias_dim = 0
+    if add_bias:
+        bias_dim = 1
     weights = []
-    weights.append(2*torch.rand(785,512)-1)
-    weights.append(2*torch.rand(513,128)-1)
-    weights.append(2*torch.rand(129,10)-1)
+    weights.append(2*torch.rand(784+bias_dim,512)-1)
+    weights.append(2*torch.rand(512+bias_dim,128)-1)
+    weights.append(2*torch.rand(128+bias_dim,10)-1)
     
     num_classes=weights[-1].shape[1]
     # Initialize eqautions for every node
@@ -218,18 +227,18 @@ def train(args, train_loader, test_loader, add_bias = True):
     for epoch in range(1, args.epochs + 1):
         for batch_idx, (data, target) in enumerate(train_loader):
             data = torch.flatten(data, start_dim=1)
-            Z_est = estimate_activations(args, weights, target, num_classes, batch_idx)
-            weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
+            Z_est = estimate_activations(args, weights, target, num_classes, batch_idx, add_bias=add_bias)
+            weights,principal_vecs,principal_vals = calculate_weights(args, data, target, Z_est, principal_vecs, principal_vals, weights, add_bias=add_bias)
             old_data = torch.cat([old_data, data],dim=0)
             #print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
             old_target = torch.cat([old_target, target],dim=0)
             if (old_data.shape[0] > 0) and (old_target.shape[0] > 0):
-                pred = torch.argmax(forward_pass(old_data, weights), dim=1)
-                imm_pred = torch.argmax(forward_pass(data, weights), dim=1)
+                pred = torch.argmax(forward_pass(old_data, weights, add_bias=add_bias), dim=1)
+                imm_pred = torch.argmax(forward_pass(data, weights, add_bias=add_bias), dim=1)
                 acc = 100 * torch.sum(pred == old_target)/old_data.shape[0]
                 imm_acc = 100 * torch.sum(imm_pred == target)/data.shape[0]
                 print(f"Old Data Accuracy: {acc}% | No. of examples: {old_data.shape[0]}/{len(train_loader)*data.shape[0]}")
-                test_acc = test(test_loader,weights)
+                test_acc = test(test_loader,weights,add_bias=add_bias)
                 # Save accuracies to a list
                 train_acc_list.append(acc)
                 imm_train_acc_list.append(imm_acc)
@@ -265,13 +274,13 @@ def forward_pass(input, weights, return_all = False, add_bias = True):
         return all_A
     return all_A[-1]
 
-def test(test_loader,weights):
+def test(test_loader,weights,add_bias=True):
     correct = 0
     with torch.no_grad():
         for data, target in test_loader:
             data = torch.flatten(data, start_dim=1)
 
-            pred = forward_pass(data,weights).argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            pred = forward_pass(data,weights,add_bias=add_bias).argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_acc = 100. * correct / len(test_loader.dataset)
