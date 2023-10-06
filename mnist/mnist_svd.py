@@ -18,7 +18,7 @@ def der_sigmoid(z):
     den = (1 + num)**2
     return num/den
 
-def estimate_activations(weights, ground_truth_list, num_classes, batch_idx, add_bias = True, method = "Backprop"):
+def estimate_activations(args, weights, ground_truth_list, num_classes, batch_idx, add_bias = True, method = "Backprop"):
     unique_grouth_truths = torch.unique(ground_truth_list)
     inputs_approx = []
     Z = {}
@@ -113,7 +113,7 @@ def estimate_activations(weights, ground_truth_list, num_classes, batch_idx, add
         ax = fig.add_subplot(3, 4, i+1)
         ax.imshow(inputs_approx[i].view(28,28))
         ax.set_title(unique_grouth_truths[i])
-    plt.savefig(f"approx_predictions/{batch_idx}.png")
+    plt.savefig(f"approx_predictions/{batch_idx}{args.suffix}.png")
     #print(Z.keys())
     #print(Z[unique_grouth_truths[1].item()].keys())
     return Z
@@ -218,7 +218,7 @@ def train(args, train_loader, test_loader, add_bias = True):
     for epoch in range(1, args.epochs + 1):
         for batch_idx, (data, target) in enumerate(train_loader):
             data = torch.flatten(data, start_dim=1)
-            Z_est = estimate_activations(weights, target, num_classes, batch_idx)
+            Z_est = estimate_activations(args, weights, target, num_classes, batch_idx)
             weights,principal_vecs,principal_vals = calculate_weights(data, target, Z_est, principal_vecs, principal_vals, weights)
             old_data = torch.cat([old_data, data],dim=0)
             #print(f"old_target.shape: {old_target.shape}, target.shape: {target.shape}")
@@ -241,7 +241,7 @@ def train(args, train_loader, test_loader, add_bias = True):
                 plt.plot(num_images_trained, imm_train_acc_list, marker='o', label='Immediate Train Acc')
                 plt.plot(num_images_trained, test_acc_list, marker='o', label='Test Acc')
                 plt.legend()
-                plt.savefig(f"acc.png")
+                plt.savefig(f"acc{args.suffix}.png")
 
             if args.dry_run:
                 break
@@ -304,6 +304,10 @@ def main():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
+    parser.add_argument('--no-bias', action='store_true', default=False,
+                        help='Run model with no bias parameter')
+    parser.add_argument('--suffix', type=str, default="", metavar='N',
+                        help='Add a suffix to results do distinguish this run from other runs')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     use_mps = not args.no_mps and torch.backends.mps.is_available()
@@ -338,7 +342,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    weights,principal_vecs,principal_vals = train(args, train_loader, test_loader)
+    weights,principal_vecs,principal_vals = train(args, train_loader, test_loader, add_bias=(not args.no_bias))
 
 if __name__ == '__main__':
     main()
